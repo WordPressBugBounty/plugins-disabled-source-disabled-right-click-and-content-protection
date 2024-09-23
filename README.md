@@ -1,0 +1,1 @@
+# plugins-disabled-source-disabled-right-click-and-content-protection
