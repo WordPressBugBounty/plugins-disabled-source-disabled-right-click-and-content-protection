@@ -237,7 +237,8 @@ function jh_disable_notifcation_style(){
 add_filter('jh_disable_roles_permission', 'jh_disable_roles_wise_permission_callback');
 function jh_disable_roles_wise_permission_callback($roles_permission){
 	$jhdoption = get_option( 'jh_disabled_option' );
-	$permission_roles = !empty($jhdoption['disable-roles']) ? $jhdoption['disable-roles'] : ['customer'];
+	$permission_roles = !empty($jhdoption['disable-roles']) && 'customer'!=$jhdoption['disable-roles'] ? $jhdoption['disable-roles'] : ['customer'];
+
 	if( is_user_logged_in() ){
 		$jh_user = wp_get_current_user();
         if( !empty($jh_user->roles[0]) && !empty($permission_roles) && in_array($jh_user->roles[0], $permission_roles)){
