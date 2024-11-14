@@ -3,19 +3,16 @@ Contributors: jahidcse
 Tags: content protection, no right click, right click off, image protection, disable IP  address and country
 Requires at least: 4.7
 Tested up to: 6.6
-Stable tag: 1.4.6
+Stable tag: 1.4.7
 Requires PHP: 5.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
-Donate link: https://buymeacoffee.com/jahidcmt4
 
 Disable Source(Ctrl+U), Disable Right click, Disable F12 functional key, and Disable save the page(Ctrl+S) and Content Protection of your WordPress Website. 
 
 == Description ==
 
 Disabled Source, Disabled Right Click, and Content Protection is a very simple plugin to Protect your Website Content, Disable view page source(Ctrl+U), Disable Right Click, Disable F12 functional key, and Disable save the page(Ctrl+S). The special thing is you to allow or disallow your post comments/review section.
-
-👉 Join Our [Facebook Group](https://www.facebook.com/groups/content.protection).
 
 The plugin is called copy content protection. It is very easy to use and install. This plugin protects content both on PC and mobile devices. Our latest features block IP Addresses.
 
@@ -48,7 +45,7 @@ The plugin is called copy content protection. It is very easy to use and install
 * Disable Print Preview Page
 * Disable by Page id
 * Disable by Role wise
-* Disable by Post Type(upcoming)
+* Disable by Post Type
 
 = 🎉 Disable Comments =
 
@@ -109,6 +106,10 @@ No.
 8. Disable by role wise
 
 == Changelog ==
+
+= 1.4.7 =
+
+* Added: Block by post type
 
 = 1.4.6 =
 
