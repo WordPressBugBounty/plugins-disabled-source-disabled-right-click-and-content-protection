@@ -2,8 +2,8 @@
 Contributors: jahidcse
 Tags: content protection, no right click, right click off, image protection, disable IP  address and country
 Requires at least: 4.7
-Tested up to: 6.7
-Stable tag: 1.5.4
+Tested up to: 6.8
+Stable tag: 1.5.5
 Requires PHP: 5.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -127,6 +127,10 @@ No.
 8. Disable by role wise
 
 == Changelog ==
+
+= 1.5.5 =
+
+* Added: Compatibility with WordPress 6.8
 
 = 1.5.4 =
 
