@@ -1,21 +1,6 @@
 <?php 
-
-/**
- * Codestar Framework Integrate
-*/
-
-if ( file_exists( JH_PATH . 'includes/admin/framework/codestar-framework.php' ) ) {
-    require_once JH_PATH . 'includes/admin/framework/codestar-framework.php';
-}
-
-/**
- * Global Option Page
-*/
-
-if ( file_exists( JH_PATH . 'includes/admin/options/global.php' ) ) {
-    require_once JH_PATH . 'includes/admin/options/global.php';
-}
-
+// don't load directly
+defined( 'ABSPATH' ) || exit;
 
 /**
  * Admin assets Enqueue
