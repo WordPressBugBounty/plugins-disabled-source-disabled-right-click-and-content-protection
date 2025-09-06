@@ -3,7 +3,7 @@ Contributors: jahidcse
 Tags: content protection, no right click, right click off, image protection, disable IP  address and country
 Requires at least: 4.7
 Tested up to: 6.8
-Stable tag: 1.6.1
+Stable tag: 1.6.2
 Requires PHP: 5.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -128,6 +128,11 @@ No.
 
 == Changelog ==
 
+= 1.6.2 =
+
+* Added: Compatibility with WooCommerce 10.1.2
+* Added: Compatibility with Elementor 3.31.3
+
 = 1.6.1 =
 
 * Added: Compatibility with WooCommerce 10.0.2
@@ -135,7 +140,7 @@ No.
 
 = 1.6.0 =
 
-* Fixed: Escaping issueS
+* Fixed: Escaping issues
 
 = 1.5.9 =
 
