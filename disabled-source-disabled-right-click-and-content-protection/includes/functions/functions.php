@@ -113,16 +113,18 @@ if( !empty($jh_disabled_options['disabled-comments']) && $jh_disabled_options['d
 }
 
 function jh_getvisitor_IP() {
-
-	if (!empty($_SERVER['HTTP_CLIENT_IP'])) { 
-		return $_SERVER['HTTP_CLIENT_IP']; 
-	} 
-	else if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) { 
-		return $_SERVER['HTTP_X_FORWARDED_FOR']; 
-	} 
-	else { 
-		return $_SERVER['REMOTE_ADDR']; 
-	} 
+	$ip = '';
+	if ( ! empty( $_SERVER['HTTP_CF_CONNECTING_IP'] ) ) {
+		$ip = $_SERVER['HTTP_CF_CONNECTING_IP'];
+	} elseif ( ! empty( $_SERVER['HTTP_CLIENT_IP'] ) ) {
+		$ip = $_SERVER['HTTP_CLIENT_IP'];
+	} elseif ( ! empty( $_SERVER['HTTP_X_FORWARDED_FOR'] ) ) {
+		$ip_list = explode( ',', $_SERVER['HTTP_X_FORWARDED_FOR'] );
+		$ip = trim( $ip_list[0] );
+	} elseif ( ! empty( $_SERVER['REMOTE_ADDR'] ) ) {
+		$ip = $_SERVER['REMOTE_ADDR'];
+	}
+	return sanitize_text_field( $ip );
 }
 
 
@@ -131,72 +133,183 @@ function jh_getvisitor_IP() {
  * Returns a 2-letter ISO country code string, or empty string on failure.
  */
 function jh_get_admin_country_code() {
-	$transient_key = 'jh_admin_country_' . md5( jh_getvisitor_IP() );
-	$cached = get_transient( $transient_key );
+	if ( ! is_admin() || ! current_user_can( 'manage_options' ) ) {
+		return '';
+	}
+
+	$admin_id  = get_current_user_id();
+	$cache_key = 'jh_admin_country_code_' . ( $admin_id ? $admin_id : 'main' );
+	$cached    = get_transient( $cache_key );
 	if ( false !== $cached ) {
 		return $cached;
 	}
 
-	$admin_ip   = jh_getvisitor_IP();
-	$info       = @unserialize( file_get_contents( 'http://ip-api.com/php/' . $admin_ip ) );
-	$country_code = ( ! empty( $info['countryCode'] ) ) ? $info['countryCode'] : '';
+	// Check Cloudflare or server GeoIP headers first
+	$header_keys = array( 'HTTP_CF_IPCOUNTRY', 'GEOIP_COUNTRY_CODE', 'HTTP_X_COUNTRY_CODE' );
+	foreach ( $header_keys as $key ) {
+		if ( ! empty( $_SERVER[ $key ] ) && strlen( $_SERVER[ $key ] ) === 2 ) {
+			$country = strtoupper( sanitize_text_field( wp_unslash( $_SERVER[ $key ] ) ) );
+			set_transient( $cache_key, $country, DAY_IN_SECONDS );
+			return $country;
+		}
+	}
 
-	set_transient( $transient_key, $country_code, 1 * HOUR_IN_SECONDS );
+	$admin_ip = jh_getvisitor_IP();
+	$is_local = empty( $admin_ip ) || in_array( $admin_ip, array( '127.0.0.1', '::1' ), true ) || filter_var( $admin_ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE ) === false;
+
+	// ip-api.com free tier requires http:// (https returns SSL unavailable)
+	$api_url = 'http://ip-api.com/json/' . ( $is_local ? '' : rawurlencode( $admin_ip ) );
+
+	$response = wp_remote_get( $api_url, array(
+		'timeout'     => 3,
+		'httpversion' => '1.1',
+		'headers'     => array( 'Accept' => 'application/json' ),
+	) );
+
+	if ( is_wp_error( $response ) ) {
+		return '';
+	}
+
+	$body = wp_remote_retrieve_body( $response );
+	$data = json_decode( $body, true );
+
+	$country_code = ( ! empty( $data['countryCode'] ) && strlen( $data['countryCode'] ) === 2 ) ? strtoupper( sanitize_text_field( $data['countryCode'] ) ) : '';
+
+	if ( ! empty( $country_code ) ) {
+		set_transient( $cache_key, $country_code, DAY_IN_SECONDS );
+	}
 
 	return $country_code;
 }
 
+/**
+ * Get visitor country code safely with header checks, cookie caching, and fallback API.
+ */
+function jh_get_visitor_country_code() {
+	// 1. Server / CDN headers (Fastest & 0 external calls)
+	$header_keys = array( 'HTTP_CF_IPCOUNTRY', 'GEOIP_COUNTRY_CODE', 'HTTP_X_COUNTRY_CODE' );
+	foreach ( $header_keys as $key ) {
+		if ( ! empty( $_SERVER[ $key ] ) && strlen( $_SERVER[ $key ] ) === 2 ) {
+			return strtoupper( sanitize_text_field( wp_unslash( $_SERVER[ $key ] ) ) );
+		}
+	}
+
+	$visitor_ip = jh_getvisitor_IP();
+	$ip_hash    = substr( md5( $visitor_ip ), 0, 8 );
+
+	// 2. Cookie check (Bound to IP hash so switching VPN country invalidates immediately)
+	if ( ! empty( $_COOKIE['jh_visitor_country_code'] ) ) {
+		$cookie_parts = explode( ':', sanitize_text_field( wp_unslash( $_COOKIE['jh_visitor_country_code'] ) ) );
+		if ( count( $cookie_parts ) === 2 && $cookie_parts[0] === $ip_hash && strlen( $cookie_parts[1] ) === 2 ) {
+			return strtoupper( $cookie_parts[1] );
+		}
+	}
+
+	// 3. Fallback to API (ip-api.com free tier requires http://)
+	$is_local = empty( $visitor_ip ) || in_array( $visitor_ip, array( '127.0.0.1', '::1' ), true ) || filter_var( $visitor_ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE ) === false;
+
+	// When testing on localhost with VPN, calling without IP allows ip-api.com to detect the machine's active VPN IP
+	$api_url = 'http://ip-api.com/json/' . ( $is_local ? '' : rawurlencode( $visitor_ip ) );
+
+	$response = wp_remote_get( $api_url, array(
+		'timeout'     => 3,
+		'httpversion' => '1.1',
+		'headers'     => array( 'Accept' => 'application/json' ),
+	) );
+
+	if ( is_wp_error( $response ) ) {
+		return '';
+	}
+
+	$body = wp_remote_retrieve_body( $response );
+	$data = json_decode( $body, true );
+
+	$country_code = ( ! empty( $data['countryCode'] ) && strlen( $data['countryCode'] ) === 2 ) ? strtoupper( sanitize_text_field( $data['countryCode'] ) ) : '';
+
+	if ( ! empty( $country_code ) && ! headers_sent() ) {
+		$cookie_val    = $ip_hash . ':' . $country_code;
+		$cookie_path   = defined( 'COOKIEPATH' ) && COOKIEPATH ? COOKIEPATH : '/';
+		$cookie_domain = defined( 'COOKIE_DOMAIN' ) ? COOKIE_DOMAIN : '';
+		@setcookie( 'jh_visitor_country_code', $cookie_val, time() + DAY_IN_SECONDS, $cookie_path, $cookie_domain, is_ssl(), true );
+	}
+
+	return $country_code;
+}
+
+/**
+ * Automatically clean up legacy transient bloat created in previous versions
+ */
+add_action( 'admin_init', 'jh_cleanup_legacy_country_transients' );
+function jh_cleanup_legacy_country_transients() {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		return;
+	}
+
+	if ( get_option( 'jh_cleaned_country_transients_v1' ) ) {
+		return;
+	}
+
+	global $wpdb;
+	$wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '_transient_jh_admin_country_%' OR option_name LIKE '_transient_timeout_jh_admin_country_%'" );
+
+	update_option( 'jh_cleaned_country_transients_v1', 1, false );
+}
+
 add_action('init','jh_visitor_address_checker');
 function jh_visitor_address_checker(){
-	$jh_disabled_ip_address= get_option( 'jh_disabled_option' );
+	// Never block on admin dashboard, login pages, or for administrators
+	$is_login = function_exists( 'jh_is_login_page' ) ? jh_is_login_page() : ( ! empty( $GLOBALS['pagenow'] ) && in_array( $GLOBALS['pagenow'], array( 'wp-login.php', 'wp-register.php' ), true ) );
+	if ( is_admin() || $is_login || current_user_can( 'manage_options' ) ) {
+		return;
+	}
+
+	$jh_disabled_ip_address = get_option( 'jh_disabled_option' );
+	if ( empty( $jh_disabled_ip_address ) || ! is_array( $jh_disabled_ip_address ) ) {
+		return;
+	}
 
 	/**
 	 * IP Address Blocked Message
 	*/
-    if (!empty($jh_disabled_ip_address['disabled_ip_section'])) {
-    	$jh_visitor_ip = jh_getvisitor_IP();
-		$jh_visitor_info = @unserialize(file_get_contents('http://ip-api.com/php/'.$jh_visitor_ip));
-
-		$jh_disabled_ip_address_list = [];
-    	foreach($jh_disabled_ip_address['disabled_ip_section'] as $singleip){
-    		$jh_disabled_ip_address_list[] = $singleip['disabled_ip'];
-    	}
-
-		if(!empty($jh_visitor_info['query'])){
-			if (in_array($jh_visitor_info['query'], $jh_disabled_ip_address_list)){
-				?>
-				<div class="jh-blocked-msg-page" style="background: <?php echo !empty($jh_disabled_ip_address['ip_disable_background']) ? esc_attr($jh_disabled_ip_address['ip_disable_background']) : '#222'; ?>;position: fixed;left: 0;top: 0;width: 100%;height: 100vh;display: flex;align-items: center;justify-content: center;">
-				<span style="color: <?php echo !empty($jh_disabled_ip_address['ip_disable_color']) ? esc_attr($jh_disabled_ip_address['ip_disable_color']) : 'red'; ?>;font-size: 30px;padding: 0 20px;">
-				<?php echo !empty( $jh_disabled_ip_address['disabled-ip-notify-text'] ) ? esc_html($jh_disabled_ip_address['disabled-ip-notify-text']) : 'Your IP is blocked !'; ?>
-				<span> 
-				</div>
-				<?php
-				exit();
-				wp_die();
+	if ( ! empty( $jh_disabled_ip_address['disabled_ip_section'] ) && is_array( $jh_disabled_ip_address['disabled_ip_section'] ) ) {
+		$jh_visitor_ip = trim( jh_getvisitor_IP() );
+		$jh_disabled_ip_address_list = array();
+		foreach ( $jh_disabled_ip_address['disabled_ip_section'] as $singleip ) {
+			if ( ! empty( $singleip['disabled_ip'] ) ) {
+				$jh_disabled_ip_address_list[] = trim( $singleip['disabled_ip'] );
 			}
 		}
-    }
+
+		if ( ! empty( $jh_visitor_ip ) && in_array( $jh_visitor_ip, $jh_disabled_ip_address_list, true ) ) {
+			?>
+			<div class="jh-blocked-msg-page" style="background: <?php echo !empty($jh_disabled_ip_address['ip_disable_background']) ? esc_attr($jh_disabled_ip_address['ip_disable_background']) : '#222'; ?>;position: fixed;left: 0;top: 0;width: 100%;height: 100vh;display: flex;align-items: center;justify-content: center;">
+			<span style="color: <?php echo !empty($jh_disabled_ip_address['ip_disable_color']) ? esc_attr($jh_disabled_ip_address['ip_disable_color']) : 'red'; ?>;font-size: 30px;padding: 0 20px;">
+			<?php echo !empty( $jh_disabled_ip_address['disabled-ip-notify-text'] ) ? esc_html($jh_disabled_ip_address['disabled-ip-notify-text']) : 'Your IP is blocked !'; ?>
+			<span> 
+			</div>
+			<?php
+			exit();
+			wp_die();
+		}
+	}
 
 	/**
 	 * Country Blocked Message
 	*/
-    if (!empty($jh_disabled_ip_address['disabled_ip_country'])) {
-    	$jh_visitor_ip = jh_getvisitor_IP();
-		$jh_visitor_info = @unserialize(file_get_contents('http://ip-api.com/php/'.$jh_visitor_ip));
-		if(!empty($jh_visitor_info['countryCode'])){
-			if (in_array($jh_visitor_info['countryCode'], $jh_disabled_ip_address['disabled_ip_country'])){
-				?>
-				<div class="jh-blocked-msg-page" style="background: <?php echo !empty($jh_disabled_ip_address['country_disable_background']) ? esc_attr($jh_disabled_ip_address['country_disable_background']) : '#222'; ?>;position: fixed;left: 0;top: 0;width: 100%;height: 100vh;display: flex;align-items: center;justify-content: center;">
-				<span style="color: <?php echo !empty($jh_disabled_ip_address['country_disable_color']) ? esc_attr($jh_disabled_ip_address['country_disable_color']) : 'red'; ?>;font-size: 30px;padding: 0 20px;">
-				<?php echo !empty( $jh_disabled_ip_address['disabled-country-notify-text'] ) ? esc_html($jh_disabled_ip_address['disabled-country-notify-text']) : 'Your Country are blocked !'; ?>
-				<span> 
-				</div>
-				<?php
-				exit();
-				wp_die();
-			}
+	if ( ! empty( $jh_disabled_ip_address['disabled_ip_country'] ) && is_array( $jh_disabled_ip_address['disabled_ip_country'] ) ) {
+		$visitor_country = jh_get_visitor_country_code();
+		if ( ! empty( $visitor_country ) && in_array( $visitor_country, $jh_disabled_ip_address['disabled_ip_country'], true ) ) {
+			?>
+			<div class="jh-blocked-msg-page" style="background: <?php echo !empty($jh_disabled_ip_address['country_disable_background']) ? esc_attr($jh_disabled_ip_address['country_disable_background']) : '#222'; ?>;position: fixed;left: 0;top: 0;width: 100%;height: 100vh;display: flex;align-items: center;justify-content: center;">
+			<span style="color: <?php echo !empty($jh_disabled_ip_address['country_disable_color']) ? esc_attr($jh_disabled_ip_address['country_disable_color']) : 'red'; ?>;font-size: 30px;padding: 0 20px;">
+			<?php echo !empty( $jh_disabled_ip_address['disabled-country-notify-text'] ) ? esc_html($jh_disabled_ip_address['disabled-country-notify-text']) : 'Your Country are blocked !'; ?>
+			<span> 
+			</div>
+			<?php
+			exit();
+			wp_die();
 		}
-    }
+	}
 
     /**
 	 * Maintenance Mode Message
